@@ -5,16 +5,15 @@ import asyncio
 from bs4 import BeautifulSoup as bs
 import requests
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import selectinload
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 import dtos
-from models import Device, Skill, SkillToDevice, Protocol, ProtocolToDevice, Manufacturer, Base
+from models import Device, Skill, Protocol, Manufacturer, Base
 
 
 DATABASE_URL = "postgresql+asyncpg://artem:tiger@localhost:5432/zigbee_db"  # Замените на URL своей базы данных
 domen = 'https://zigbee.blakadder.com'
-
+repeat_count = 0
 
 async def parse_zigbee_blakadder(async_session: async_sessionmaker[AsyncSession]) -> List[dtos.DeviceDTO]:
     device_count = 0
@@ -58,6 +57,7 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
         parameters_table = soup.find_all("table") # device parameters stores in tables
         skills: set(str) = set()
         manufacturer_link = 'None'
+        manufacturer_device_page_link = 'None'
         sellers_url: List[str] = list()
         for parameters in parameters_table:
             try:
@@ -69,7 +69,8 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
                 for skill in parameters.find_all('td'):
                     skills.add(str(skill.string).strip('\n  '))
             elif table_name == 'Manufacturer:':
-                manufacturer_link = parameters.find('a').attrs['href'].strip('\n  ')
+                manufacturer_device_page_link = parameters.find('a').attrs['href'].strip('\n  ')
+                manufacturer_link = parameters.find('a').string
             elif  table_name == 'Available from:':
                 for url in parameters.find_all('a'):
                     if url.attrs['href'].strip('\n') != '':
@@ -79,7 +80,7 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
         if sellers_url == list():
             sellers_url.append('None')
 
-        device = dtos.DeviceDTO(protocols, skills, sellers_url, manufacturer, manufacturer_link, zigbee_id, model, name, origin_link, description)
+        device = dtos.DeviceDTO(protocols, skills, sellers_url, manufacturer, manufacturer_link, zigbee_id, model, name, origin_link, description, manufacturer_device_page_link)
         return(device)
 
     else:
@@ -117,7 +118,7 @@ async def create_device(async_session: async_sessionmaker[AsyncSession], device:
                 protocol = protocol[0]
                 
         ### Device update ###
-        db_device = await session.execute(select(Device).where(Device.name == device.name)) # check if device data already exists in table
+        db_device = await session.execute(select(Device).where((Device.name == device.name) & (Device.model == device.model))) # check if device data already exists in table
         db_device = db_device.fetchone()
         if not db_device:
             db_device = Device(
@@ -130,56 +131,27 @@ async def create_device(async_session: async_sessionmaker[AsyncSession], device:
                         name = device.name,
                         origin_link = device.origin_link,
                         description = device.description, 
-                        manufacturer_link = device.manufacturer_link) # add new entry if not yet exists
+                        manufacturer_link = device.manufacturer_device_page_link) # add new entry if not yet exists
             session.add(db_device)
+        else:
+            global repeat_count
+            repeat_count += 1
+            print(f'NUM OF REPEATED DEVICES = {repeat_count}')
 
-            
-       
         session.add_all(skills)
         session.add_all(protocols)
 
-            
-     
-
         await session.commit()
 
-
-async def select_and_update_objects(
-    async_session: async_sessionmaker[AsyncSession],
-) -> None:
-    async with async_session() as session:
-        stmt = select(A).options(selectinload(A.bs))
-
-        result = await session.execute(stmt)
-
-        for a1 in result.scalars():
-            print(a1)
-            print(f"created at: {a1.create_date}")
-            
-
-        result = await session.execute(select(A).order_by(A.id).limit(1))
-
-        a1 = result.scalars().one()
-
-        a1.data = "new data"
-
-        await session.commit()
-
-        # access attribute subsequent to commit; this is what
-        # expire_on_commit=False allows
-
-        # alternatively, AsyncAttrs may be used to access any attribute
-        # as an awaitable (new in 2.0.13)
-        
 
 async def async_main() -> None:
+    
+
     engine = create_async_engine(
         DATABASE_URL,
         echo=True,
     )
 
-    # async_sessionmaker: a factory for new AsyncSession objects.
-    # expire_on_commit - don't expire objects after transaction commit
     async_session = async_sessionmaker(engine, expire_on_commit=False)
 
     async with engine.begin() as conn:
@@ -187,8 +159,6 @@ async def async_main() -> None:
 
     await parse_zigbee_blakadder(async_session)
 
-    # for AsyncEngine created in function scope, close and
-    # clean-up pooled connections
     await engine.dispose()
 
 

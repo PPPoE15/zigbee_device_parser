@@ -48,7 +48,6 @@ class Manufacturer(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(unique=True)
     link: Mapped[str]
-    # device: Mapped[str] = mapped_column(unique=True)
     device: Mapped[List[Device]] = relationship("Device", back_populates='manufacturer')
 
 class Skill(Base):
