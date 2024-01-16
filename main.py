@@ -4,9 +4,9 @@ import asyncio
 
 from bs4 import BeautifulSoup as bs
 import requests
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker, AsyncAttrs
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
-from sqlalchemy import create_engine, select, func
+from sqlalchemy import select, func
 
 import dtos
 from models import Device, Skill, SkillToDevice, Protocol, ProtocolToDevice, Manufacturer, Base
@@ -40,6 +40,14 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
         description = str(soup.find_all("span", "small")[0].string)
         name = str(soup.find_all("span")[1].string)
         model = str(soup.find_all("span")[2].string)[6:]
+
+        index = model.find('manufactured by')
+        if index != -1:
+            manufacturer = model[index:].strip()[16:].capitalize()
+            model = model[:index].strip()
+        else:
+            print("Model finding error!")
+
         zigbee_id = str(soup.find_all("span")[4].string)[11:]
 
         protocols: set(str) = set()
@@ -50,8 +58,7 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
         parameters_table = soup.find_all("table") # device parameters stores in tables
         skills: set(str) = set()
         manufacturer_link = 'None'
-        sellers_url: set(str) = set()
-        pattern = re.compile(r'https?://([^/]+)')
+        sellers_url: List[str] = list()
         for parameters in parameters_table:
             try:
                 table_name = str(parameters.find_all("thead")[0].text).strip('\n  ')
@@ -66,16 +73,11 @@ def parse_device_page(origin_link: str) -> dtos.DeviceDTO:
             elif  table_name == 'Available from:':
                 for url in parameters.find_all('a'):
                     if url.attrs['href'].strip('\n') != '':
-                        sellers_url.add(url.attrs['href'].strip('\n'))   
+                        sellers_url.append(url.attrs['href'].strip('\n'))   
         if skills == set():
             skills.add('None')
-        if sellers_url == set():
-            sellers_url.add('None')
-        match = pattern.search(manufacturer_link)
-        if match:
-            manufacturer = match.group(1)
-        else:
-            manufacturer = 'None'
+        if sellers_url == list():
+            sellers_url.append('None')
 
         device = dtos.DeviceDTO(protocols, skills, sellers_url, manufacturer, manufacturer_link, zigbee_id, model, name, origin_link, description)
         return(device)
@@ -121,8 +123,8 @@ async def create_device(async_session: async_sessionmaker[AsyncSession], device:
             db_device = Device(
                         manufacturer = manufacturer,
                         protocols=protocols,     
-                          
-                        #sellers_url = device.sellers_url,
+                        skills=skills,
+                        sellers_url = device.sellers_url,
                         zigbee_id = device.zigbee_id,
                         model = device.model,
                         name = device.name,

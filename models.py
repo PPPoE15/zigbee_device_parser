@@ -31,7 +31,7 @@ class Device(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     manufacturer_id: Mapped[int] = mapped_column(ForeignKey("manufacturer.id"))
     manufacturer: Mapped['Manufacturer'] = relationship("Manufacturer", back_populates='device')
-    #sellers_url: List[str] = Column(ARRAY(String))
+    sellers_url: List[str] = Column(ARRAY(String))
     zigbee_id: Mapped[str]
     model: Mapped[str]
     name: Mapped[str]
@@ -47,7 +47,7 @@ class Manufacturer(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(unique=True)
-    link: Mapped[str] = mapped_column(unique=True)
+    link: Mapped[str]
     # device: Mapped[str] = mapped_column(unique=True)
     device: Mapped[List[Device]] = relationship("Device", back_populates='manufacturer')
 
